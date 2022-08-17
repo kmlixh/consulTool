@@ -1,4 +1,4 @@
-module consulTool
+module github.com/kmlixh/consulTool
 
 go 1.18
 
