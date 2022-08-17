@@ -19,8 +19,8 @@ func init() {
 }
 func main() {
 	consulTool.Debug(true)
-	watch := consulTool.NewKvWatch(config)
-	watch.WatchKey("janyee/auth/prod", func(index uint64, kvPair *api.KVPair) {
+	watch := consulTool.NewWatch(config)
+	watch.WatchKv("janyee/auth/prod", func(index uint64, kvPair *api.KVPair) {
 		fmt.Printf("\nkey [%s] changed:%s\n", kvPair.Key, string(kvPair.Value))
 	})
 	agent := consulTool.NewServiceAgent(config)
@@ -32,7 +32,8 @@ func main() {
 			curTime, _ := <-timeAfterTrigger
 			// print current time
 			fmt.Println(curTime.Format("2006-01-02 15:04:05"))
-			resp, er := agent.Service("mongo").Get("/hello", nil)
+			service, er := agent.Service("mongo")
+			resp, er := service.Get("/hello", nil)
 			if er != nil {
 				fmt.Println(er)
 				continue

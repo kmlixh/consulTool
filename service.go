@@ -13,15 +13,19 @@ import (
 )
 
 type Service struct {
-	host       string
-	port       int
-	HttpClient *http.Client
+	ServiceName string
+	agent       *Agent
+	HttpClient  *http.Client
 }
 
 func (s Service) Do(method string, path string, queries map[string]string, headers map[string]string, body io.Reader) (*http.Response, error) {
+	ss, er := s.agent.pickService(s.ServiceName)
+	if er != nil {
+		return nil, er
+	}
 	u := url.URL{}
 	u.Scheme = "http"
-	u.Host = fmt.Sprintf("%s:%d", s.host, s.port)
+	u.Host = fmt.Sprintf("%s:%d", ss.Address, ss.Port)
 	u.Path = path
 
 	if queries != nil && len(queries) > 0 {

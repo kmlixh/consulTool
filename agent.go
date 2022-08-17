@@ -26,11 +26,17 @@ func Debug(_debug bool) {
 	debug = _debug
 }
 
-func (s *Agent) Service(service string) *Service {
+func (s *Agent) Service(service string) (*Service, error) {
+	return &Service{ServiceName: service, agent: s, HttpClient: http.DefaultClient}, nil
+}
+func (s *Agent) pickService(service string) (*api.AgentService, error) {
 	if er := s.initService(service); er != nil {
 		panic(er)
 	}
 	sArrays, _ := s.serviceMap[service]
+	if sArrays == nil || len(sArrays) == 0 {
+		return nil, errors.New(fmt.Sprintf("service named %s not found", service))
+	}
 	//Round Robin
 	i, ok := s.roundMap[service]
 	if !ok {
@@ -47,7 +53,7 @@ func (s *Agent) Service(service string) *Service {
 	if debug {
 		fmt.Println("Round Robin index was:", *i)
 	}
-	return &Service{host: sArrays[idx].Address, port: sArrays[idx].Port, HttpClient: http.DefaultClient}
+	return sArrays[idx], nil
 }
 func (s *Agent) Watch(serviceNames ...string) error {
 	if len(serviceNames) == 0 {
