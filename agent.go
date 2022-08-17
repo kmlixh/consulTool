@@ -124,7 +124,7 @@ func (s *Agent) Refresh(serviceNames ...string) error {
 	}
 	return nil
 }
-func NewServiceAgent(config *api.Config) *Agent {
+func NewAgent(config *api.Config) *Agent {
 	client, er := api.NewClient(config)
 	if er != nil {
 		panic(er)

@@ -22,3 +22,22 @@ DeRegisterService() //deregister service
 `
 ### Watch
 
+`
+NewWatch(config *api.Config) *Watch //to create a tool for watching
+
+WatchKv  //watch the key/value changed
+WatchService //watch one service status
+WatchAllServices // watch all service status,only name changed
+
+`
+
+### Agent
+
+*Agent use to choose a service and 'proxy' it
+
+`
+NewAgent(config *api.Config) *Agent 
+
+
+`
+
