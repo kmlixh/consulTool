@@ -20,6 +20,7 @@ type ServiceRegistrant struct {
 	HttpSchema                     string
 	Notes                          string
 	Tags                           []string
+	Meta                           map[string]string
 	Interval                       string
 	Timeout                        string
 	DeregisterCriticalServiceAfter string
@@ -42,6 +43,7 @@ func (a ServiceRegistrant) RegisterService() error {
 		Name:    a.ServiceName,
 		ID:      a.ServiceId,
 		Tags:    a.Tags,
+		Meta:    a.Meta,
 		Port:    a.Port,
 		Address: a.Address,
 		Check:   &check,
