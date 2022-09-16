@@ -8,7 +8,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -16,6 +15,10 @@ type Service struct {
 	ServiceName string
 	agent       *Agent
 	HttpClient  *http.Client
+}
+type FileReader interface {
+	io.Reader
+	Name() string
 }
 
 func (s Service) Do(method string, path string, queries map[string]string, headers map[string]string, body io.Reader) (*http.Response, error) {
@@ -61,7 +64,7 @@ func (s Service) PostJson(path string, headers map[string]string, data interface
 func (s Service) PostForm(path string, headers map[string]string, data url.Values) (*http.Response, error) {
 	return s.Do(http.MethodPost, path, nil, headers, strings.NewReader(data.Encode()))
 }
-func (s Service) PostMultipartForm(path string, headers map[string]string, files map[string][]os.File, form url.Values) (*http.Response, error) {
+func (s Service) PostMultipartForm(path string, headers map[string]string, files map[string][]FileReader, form url.Values) (*http.Response, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 	if files == nil || len(files) == 0 {
@@ -74,7 +77,7 @@ func (s Service) PostMultipartForm(path string, headers map[string]string, files
 				if er != nil {
 					panic(er)
 				}
-				_, err := io.Copy(fw, &f)
+				_, err := io.Copy(fw, f)
 				if err != nil {
 					panic(err)
 				}
