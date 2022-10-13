@@ -1,12 +1,16 @@
 package consulTool
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"github.com/hashicorp/consul/api"
 	"github.com/hashicorp/consul/api/watch"
+	"net"
 	"net/http"
+	"strconv"
 	"sync/atomic"
+	"time"
 )
 
 var debug = false
@@ -14,28 +18,65 @@ var debug = false
 var MaxRound uint32 = 10000
 
 type Agent struct {
-	config     *api.Config
-	client     *api.Client
-	agent      *api.Agent
-	serviceMap map[string][]*api.AgentService
-	watchMap   map[string]*watch.Plan
-	roundMap   map[string]*uint32
+	consulConfig *api.Config
+	consulClient *api.Client
+	consulAgent  *api.Agent
+	serviceMap   map[string][]*api.AgentService
+	watchMap     map[string]*watch.Plan
+	roundMap     map[string]*uint32
+	httpClient   *http.Client
 }
 
 func Debug(_debug bool) {
 	debug = _debug
 }
 
-func (s *Agent) Service(service string) (*Service, error) {
-	return &Service{ServiceName: service, agent: s, HttpClient: http.DefaultClient}, nil
+func (a *Agent) HttpClient() *http.Client {
+	if a.httpClient == nil {
+		dialer := &net.Dialer{
+			Timeout: 39 * time.Second,
+		}
+		httpCLients := &http.Client{
+			Timeout: time.Duration(5) * time.Second, //超时时间
+			Transport: &http.Transport{
+				MaxIdleConnsPerHost:   200,   //单个路由最大空闲连接数
+				MaxConnsPerHost:       10000, //单个路由最大连接数
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   30 * time.Second,
+				ExpectContinueTimeout: 10 * time.Second,
+				DisableKeepAlives:     true,
+				DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+					host, port, err := net.SplitHostPort(address)
+					if err != nil {
+						return nil, err
+					}
+					//通过自定义nameserver获取域名解析的IP
+					ss, ok := a.pickService(host)
+					// 创建链接
+					if ok {
+						host = ss.Address
+						port = strconv.Itoa(ss.Port)
+						conn, err := dialer.DialContext(ctx, network, host+":"+port)
+						if err == nil {
+							return conn, nil
+						}
+					}
+					return dialer.DialContext(ctx, network, address)
+				},
+			},
+		}
+		a.httpClient = httpCLients
+	}
+	return a.httpClient
 }
-func (s *Agent) pickService(service string) (*api.AgentService, error) {
+
+func (s *Agent) pickService(service string) (*api.AgentService, bool) {
 	if er := s.initService(service); er != nil {
-		panic(er)
+		return nil, false
 	}
 	sArrays, _ := s.serviceMap[service]
 	if sArrays == nil || len(sArrays) == 0 {
-		return nil, errors.New(fmt.Sprintf("service named %s not found", service))
+		return nil, false
 	}
 	//Round Robin
 	i, ok := s.roundMap[service]
@@ -53,7 +94,7 @@ func (s *Agent) pickService(service string) (*api.AgentService, error) {
 	if debug {
 		fmt.Println("Round Robin index was:", *i)
 	}
-	return sArrays[idx], nil
+	return sArrays[idx], true
 }
 func (s *Agent) Watch(serviceNames ...string) error {
 	if len(serviceNames) == 0 {
@@ -89,7 +130,7 @@ func (s *Agent) watch(service string) (er error) {
 		}
 		s.serviceMap[service] = array
 	}
-	go plan.RunWithClientAndHclog(s.client, nil)
+	go plan.RunWithClientAndHclog(s.consulClient, nil)
 	s.watchMap[service] = plan
 	return nil
 }
@@ -100,7 +141,7 @@ func (s *Agent) initService(service string) error {
 	} else {
 		arrays = []*api.AgentService{}
 	}
-	status, services, er := s.agent.AgentHealthServiceByName(service)
+	status, services, er := s.consulAgent.AgentHealthServiceByName(service)
 	if er != nil {
 		return er
 	}
@@ -124,10 +165,11 @@ func (s *Agent) Refresh(serviceNames ...string) error {
 	}
 	return nil
 }
+
 func NewAgent(config *api.Config) *Agent {
 	client, er := api.NewClient(config)
 	if er != nil {
 		panic(er)
 	}
-	return &Agent{config: config, client: client, agent: client.Agent(), serviceMap: map[string][]*api.AgentService{}, watchMap: map[string]*watch.Plan{}, roundMap: map[string]*uint32{}}
+	return &Agent{consulConfig: config, consulClient: client, consulAgent: client.Agent(), serviceMap: map[string][]*api.AgentService{}, watchMap: map[string]*watch.Plan{}, roundMap: map[string]*uint32{}}
 }
