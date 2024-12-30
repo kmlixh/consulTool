@@ -4,16 +4,29 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/hashicorp/consul/api"
-	"github.com/hashicorp/consul/api/watch"
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/hashicorp/consul/api"
+	"github.com/hashicorp/consul/api/watch"
 )
 
-var debug = false
+var (
+	debug                 = false
+	ErrServiceNotFound    = errors.New("service not found")
+	ErrNoHealthyInstances = errors.New("no healthy instances available")
+	ErrConsulNotAvailable = errors.New("consul service not available")
+	ErrEmptyServiceName   = errors.New("empty service name")
+	ErrNothingToRefresh   = errors.New("nothing to refresh")
+
+	defaultRetryAttempts = 3
+	defaultRetryDelay    = 1 * time.Second
+	defaultTimeout       = 5 * time.Second
+)
 
 var MaxRound uint32 = 10000
 
@@ -25,6 +38,39 @@ type Agent struct {
 	watchMap     map[string]*watch.Plan
 	roundMap     map[string]*uint32
 	httpClient   *http.Client
+	mu           sync.RWMutex
+	ctx          context.Context
+	cancel       context.CancelFunc
+}
+
+// RetryWithTimeout 重试函数，带超时控制
+func RetryWithTimeout(ctx context.Context, operation func() error) error {
+	var lastErr error
+	for attempt := 0; attempt < defaultRetryAttempts; attempt++ {
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("%w: %v", ctx.Err(), lastErr)
+			}
+			return ctx.Err()
+		default:
+			if err := operation(); err == nil {
+				return nil
+			} else {
+				lastErr = err
+				// 如果是已知的错误类型，直接返回
+				if errors.Is(err, ErrEmptyServiceName) ||
+					errors.Is(err, ErrNothingToRefresh) ||
+					errors.Is(err, ErrServiceNotFound) {
+					return err
+				}
+				if attempt < defaultRetryAttempts-1 {
+					time.Sleep(defaultRetryDelay)
+				}
+			}
+		}
+	}
+	return lastErr
 }
 
 func Debug(_debug bool) {
@@ -34,13 +80,13 @@ func Debug(_debug bool) {
 func (a *Agent) HttpClient() *http.Client {
 	if a.httpClient == nil {
 		dialer := &net.Dialer{
-			Timeout: 39 * time.Second,
+			Timeout: defaultTimeout,
 		}
 		httpCLients := &http.Client{
-			Timeout: time.Duration(5) * time.Second, //超时时间
+			Timeout: defaultTimeout,
 			Transport: &http.Transport{
-				MaxIdleConnsPerHost:   200,   //单个路由最大空闲连接数
-				MaxConnsPerHost:       10000, //单个路由最大连接数
+				MaxIdleConnsPerHost:   200,
+				MaxConnsPerHost:       10000,
 				IdleConnTimeout:       90 * time.Second,
 				TLSHandshakeTimeout:   30 * time.Second,
 				ExpectContinueTimeout: 10 * time.Second,
@@ -48,16 +94,14 @@ func (a *Agent) HttpClient() *http.Client {
 				DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
 					host, port, err := net.SplitHostPort(address)
 					if err != nil {
-						return nil, err
+						return nil, fmt.Errorf("failed to split host port: %w", err)
 					}
-					//通过自定义nameserver获取域名解析的IP
+
 					ss, ok := a.pickService(host)
-					// 创建链接
 					if ok {
 						host = ss.Address
 						port = strconv.Itoa(ss.Port)
-						conn, err := dialer.DialContext(ctx, network, host+":"+port)
-						if err == nil {
+						if conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(host, port)); err == nil {
 							return conn, nil
 						}
 					}
@@ -71,105 +115,299 @@ func (a *Agent) HttpClient() *http.Client {
 }
 
 func (s *Agent) pickService(service string) (*api.AgentService, bool) {
-	if er := s.initService(service); er != nil {
+	if service == "" {
 		return nil, false
 	}
-	sArrays, _ := s.serviceMap[service]
-	if sArrays == nil || len(sArrays) == 0 {
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if err := s.initServiceLocked(service); err != nil {
+		if debug {
+			fmt.Printf("Failed to init service %s: %v\n", service, err)
+		}
 		return nil, false
 	}
-	//Round Robin
+
+	sArrays, exists := s.serviceMap[service]
+	if !exists || len(sArrays) == 0 {
+		return nil, false
+	}
+
 	i, ok := s.roundMap[service]
 	if !ok {
 		d := uint32(0)
 		i = &d
 		s.roundMap[service] = &d
 	}
-	idx := (*i) % uint32(len(sArrays))
-	if *i < MaxRound {
+
+	idx := atomic.LoadUint32(i) % uint32(len(sArrays))
+	if atomic.LoadUint32(i) < MaxRound {
 		atomic.AddUint32(i, 1)
 	} else {
 		atomic.StoreUint32(i, 0)
 	}
+
 	if debug {
-		fmt.Println("Round Robin index was:", *i)
+		fmt.Printf("Service %s: picked instance %d of %d\n", service, idx, len(sArrays))
 	}
+
 	return sArrays[idx], true
 }
+
 func (s *Agent) Watch(serviceNames ...string) error {
 	if len(serviceNames) == 0 {
-		panic(errors.New("watch noting"))
+		return ErrNothingToRefresh
 	}
-	if len(serviceNames) > 0 {
-		for _, v := range serviceNames {
-			s.watch(v)
+
+	for _, name := range serviceNames {
+		if name == "" {
+			return ErrEmptyServiceName
+		}
+
+		ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
+		defer cancel()
+
+		if err := RetryWithTimeout(ctx, func() error {
+			return s.watch(name)
+		}); err != nil {
+			return fmt.Errorf("failed to watch service %s: %w", name, err)
 		}
 	}
 	return nil
 }
+
 func (s *Agent) watch(service string) (er error) {
+	if service == "" {
+		return ErrEmptyServiceName
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	plan, ok := s.watchMap[service]
-	if ok {
+	if ok && plan != nil {
 		return nil
 	}
-	plan, er = watch.Parse(map[string]interface{}{"type": "service", "service": service})
-	if er != nil {
-		return
+
+	if err := s.initServiceLocked(service); err != nil {
+		if errors.Is(err, ErrServiceNotFound) ||
+			errors.Is(err, ErrEmptyServiceName) ||
+			errors.Is(err, ErrNoHealthyInstances) {
+			return err
+		}
+		return fmt.Errorf("failed to initialize service: %w", err)
 	}
+
+	plan, er = watch.Parse(map[string]interface{}{
+		"type":    "service",
+		"service": service,
+		"timeout": defaultTimeout.String(),
+	})
+	if er != nil {
+		return fmt.Errorf("failed to parse watch plan: %w", er)
+	}
+
 	plan.Handler = func(index uint64, data interface{}) {
 		services, ok := data.([]*api.ServiceEntry)
 		if !ok {
-			er = errors.New("parse data to ServiceEntry failed")
+			if debug {
+				fmt.Printf("Failed to parse watch data for service %s\n", service)
+			}
 			return
 		}
+
+		s.mu.Lock()
+		defer s.mu.Unlock()
+
 		var array []*api.AgentService
 		for _, v := range services {
-			if v.Checks.AggregatedStatus() == "passing" {
+			if v.Checks.AggregatedStatus() == api.HealthPassing {
 				array = append(array, v.Service)
 			}
 		}
+
+		if len(array) == 0 {
+			if debug {
+				fmt.Printf("No healthy instances found for service: %s\n", service)
+			}
+			return
+		}
+
 		s.serviceMap[service] = array
+		if debug {
+			fmt.Printf("Updated service %s with %d healthy instances\n", service, len(array))
+		}
 	}
-	go plan.RunWithClientAndHclog(s.consulClient, nil)
+
+	watchCtx, cancel := context.WithCancel(s.ctx)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if debug {
+					fmt.Printf("Recovered from watch panic for service %s: %v\n", service, r)
+				}
+			}
+			cancel()
+		}()
+
+		if err := plan.RunWithClientAndHclog(s.consulClient, nil); err != nil && debug {
+			fmt.Printf("Watch plan for service %s ended with error: %v\n", service, err)
+		}
+	}()
+
+	go func() {
+		<-watchCtx.Done()
+		if debug {
+			fmt.Printf("Stopping watch for service %s\n", service)
+		}
+		plan.Stop()
+	}()
+
 	s.watchMap[service] = plan
 	return nil
 }
-func (s *Agent) initService(service string) error {
-	arrays, ok := s.serviceMap[service]
-	if ok {
+
+func (s *Agent) initServiceLocked(service string) error {
+	if service == "" {
+		return ErrEmptyServiceName
+	}
+
+	ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		defer close(done)
+
+		status, services, er := s.consulAgent.AgentHealthServiceByName(service)
+		if er != nil {
+			if _, ok := er.(*net.OpError); ok {
+				done <- ErrConsulNotAvailable
+				return
+			}
+			done <- er
+			return
+		}
+
+		if status != api.HealthPassing {
+			done <- ErrNoHealthyInstances
+			return
+		}
+
+		if len(services) == 0 {
+			done <- ErrServiceNotFound
+			return
+		}
+
+		var arrays []*api.AgentService
+		for _, ss := range services {
+			if ss.Service != nil {
+				arrays = append(arrays, ss.Service)
+			}
+		}
+
+		if len(arrays) == 0 {
+			done <- ErrNoHealthyInstances
+			return
+		}
+
+		s.serviceMap[service] = arrays
+		done <- nil
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			return fmt.Errorf("failed to init service %s: %w", service, err)
+		}
 		return nil
-	} else {
-		arrays = []*api.AgentService{}
+	case <-ctx.Done():
+		return fmt.Errorf("init service %s timeout: %w", service, ctx.Err())
 	}
-	status, services, er := s.consulAgent.AgentHealthServiceByName(service)
-	if er != nil {
-		return er
-	}
-	if status != "passing" {
-		return errors.New(fmt.Sprintf("there was no passing service named %s", service))
-	}
-	for _, ss := range services {
-		arrays = append(arrays, ss.Service)
-	}
-	s.serviceMap[service] = arrays
-	s.watch(service)
-	return nil
 }
+
 func (s *Agent) Refresh(serviceNames ...string) error {
 	if len(serviceNames) == 0 {
-		return errors.New("nothing to refresh")
+		return ErrNothingToRefresh
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for _, name := range serviceNames {
+		if name == "" {
+			return ErrEmptyServiceName
+		}
+
+		if plan, exists := s.watchMap[name]; exists && plan != nil {
+			plan.Stop()
+			delete(s.watchMap, name)
+		}
+
 		delete(s.serviceMap, name)
-		s.initService(name)
+
+		ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
+		defer cancel()
+
+		if err := RetryWithTimeout(ctx, func() error {
+			if err := s.initServiceLocked(name); err != nil {
+				return fmt.Errorf("failed to refresh service %s: %w", name, err)
+			}
+			return s.watch(name)
+		}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
 
 func NewAgent(config *api.Config) *Agent {
+	if config == nil {
+		config = api.DefaultConfig()
+	}
+
 	client, er := api.NewClient(config)
 	if er != nil {
-		panic(er)
+		panic(fmt.Errorf("failed to create consul client: %w", er))
 	}
-	return &Agent{consulConfig: config, consulClient: client, consulAgent: client.Agent(), serviceMap: map[string][]*api.AgentService{}, watchMap: map[string]*watch.Plan{}, roundMap: map[string]*uint32{}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Agent{
+		consulConfig: config,
+		consulClient: client,
+		consulAgent:  client.Agent(),
+		serviceMap:   make(map[string][]*api.AgentService),
+		watchMap:     make(map[string]*watch.Plan),
+		roundMap:     make(map[string]*uint32),
+		ctx:          ctx,
+		cancel:       cancel,
+	}
+}
+
+func (s *Agent) Close() error {
+	s.cancel()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for service, plan := range s.watchMap {
+		if plan != nil {
+			if debug {
+				fmt.Printf("Stopping watch for service %s\n", service)
+			}
+			plan.Stop()
+		}
+		delete(s.watchMap, service)
+	}
+
+	if s.httpClient != nil {
+		if transport, ok := s.httpClient.Transport.(*http.Transport); ok {
+			transport.CloseIdleConnections()
+		}
+	}
+
+	s.serviceMap = nil
+	s.roundMap = nil
+	s.httpClient = nil
+	return nil
 }
