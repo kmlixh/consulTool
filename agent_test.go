@@ -17,8 +17,8 @@ const (
 )
 
 func setupTestAgent(t *testing.T) *Agent {
-	config := api.DefaultConfig()
-	config.Address = testConsulAddress
+	config := NewConfig()
+	config.SetAddress(testConsulAddress)
 
 	agent := NewAgent(config)
 	t.Cleanup(func() {

@@ -31,7 +31,7 @@ var (
 var MaxRound uint32 = 10000
 
 type Agent struct {
-	consulConfig *api.Config
+	consulConfig *Config
 	consulClient *api.Client
 	consulAgent  *api.Agent
 	serviceMap   map[string][]*api.AgentService
@@ -362,12 +362,12 @@ func (s *Agent) Refresh(serviceNames ...string) error {
 	return nil
 }
 
-func NewAgent(config *api.Config) *Agent {
+func NewAgent(config *Config) *Agent {
 	if config == nil {
-		config = api.DefaultConfig()
+		config = NewConfig()
 	}
 
-	client, er := api.NewClient(config)
+	client, er := api.NewClient(config.getConfig())
 	if er != nil {
 		panic(fmt.Errorf("failed to create consul client: %w", er))
 	}

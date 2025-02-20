@@ -3,13 +3,14 @@ package consulTool
 import (
 	"errors"
 	"fmt"
-	"github.com/hashicorp/consul/api"
 	"net"
 	"strings"
+
+	"github.com/hashicorp/consul/api"
 )
 
 type ServiceRegistrant struct {
-	config                         *api.Config
+	config                         *Config
 	client                         *api.Client
 	agent                          *api.Agent
 	ServiceName                    string
@@ -29,7 +30,7 @@ type ServiceRegistrant struct {
 
 func (a ServiceRegistrant) RegisterService() error {
 	if a.Address == "" {
-		a.Address = getOutIp(a.config.Address)
+		a.Address = getOutIp(a.config.GetAddress())
 	}
 	// 设置Consul对服务健康检查的参数
 	check := api.AgentServiceCheck{
@@ -57,8 +58,8 @@ func (a ServiceRegistrant) DeRegisterService() error {
 	return a.agent.ServiceDeregister(a.ServiceId)
 }
 
-func NewServiceRegistrant(config *api.Config, serviceName string, id string, port int, healthCheckPath string) *ServiceRegistrant {
-	client, er := api.NewClient(config)
+func NewServiceRegistrant(config *Config, serviceName string, id string, port int, healthCheckPath string) *ServiceRegistrant {
+	client, er := api.NewClient(config.getConfig())
 	if er != nil {
 		panic(er)
 	}

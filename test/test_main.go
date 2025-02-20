@@ -2,18 +2,19 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+
 	"github.com/hashicorp/consul/api"
 	"github.com/kmlixh/consulTool"
-	"net/http"
 )
 
-var config *api.Config
+var config *consulTool.Config
 var serviceName = "demo"
 var serviceId = "1"
 
 func init() {
-	config = api.DefaultConfig()
-	config.Address = "192.168.110.249:8500"
+	config = consulTool.NewConfig()
+	config.SetAddress("192.168.110.249:8500")
 }
 func main() {
 	consulTool.Debug(false)

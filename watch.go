@@ -9,7 +9,7 @@ type KvWatchFunc func(index uint64, kvPair *api.KVPair)
 type ServiceWatchFunc func(index uint64, services []*api.ServiceEntry)
 
 type Watch struct {
-	config   *api.Config
+	config   *Config
 	client   *api.Client
 	agent    *api.Agent
 	watchMap map[string]*watch.Plan
@@ -82,8 +82,8 @@ func (c *Watch) StopWatchAllServices() error {
 	plan.Stop()
 	return nil
 }
-func NewWatch(config *api.Config) *Watch {
-	client, er := api.NewClient(config)
+func NewWatch(config *Config) *Watch {
+	client, er := api.NewClient(config.getConfig())
 	if er != nil {
 		panic(er)
 	}
