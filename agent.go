@@ -165,12 +165,7 @@ func (s *Agent) Watch(serviceNames ...string) error {
 			return ErrEmptyServiceName
 		}
 
-		ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
-		defer cancel()
-
-		if err := RetryWithTimeout(ctx, func() error {
-			return s.watch(name)
-		}); err != nil {
+		if err := s.watch(name); err != nil {
 			return fmt.Errorf("failed to watch service %s: %w", name, err)
 		}
 	}
@@ -199,11 +194,12 @@ func (s *Agent) watch(service string) (er error) {
 		return fmt.Errorf("failed to initialize service: %w", err)
 	}
 
-	plan, er = watch.Parse(map[string]interface{}{
-		"type":        "service",
-		"service":     service,
-		"passingonly": true,
-	})
+	params := map[string]interface{}{
+		"type":    "service",
+		"service": service,
+	}
+
+	plan, er = watch.Parse(params)
 	if er != nil {
 		return fmt.Errorf("failed to parse watch plan: %w", er)
 	}
@@ -240,7 +236,6 @@ func (s *Agent) watch(service string) (er error) {
 		}
 	}
 
-	watchCtx, cancel := context.WithCancel(s.ctx)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -248,20 +243,11 @@ func (s *Agent) watch(service string) (er error) {
 					fmt.Printf("Recovered from watch panic for service %s: %v\n", service, r)
 				}
 			}
-			cancel()
 		}()
 
 		if err := plan.RunWithClientAndHclog(s.consulClient, nil); err != nil && debug {
 			fmt.Printf("Watch plan for service %s ended with error: %v\n", service, err)
 		}
-	}()
-
-	go func() {
-		<-watchCtx.Done()
-		if debug {
-			fmt.Printf("Stopping watch for service %s\n", service)
-		}
-		plan.Stop()
 	}()
 
 	s.watchMap[service] = plan
@@ -273,58 +259,33 @@ func (s *Agent) initServiceLocked(service string) error {
 		return ErrEmptyServiceName
 	}
 
-	ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		defer close(done)
-
-		status, services, er := s.consulAgent.AgentHealthServiceByName(service)
-		if er != nil {
-			if _, ok := er.(*net.OpError); ok {
-				done <- ErrConsulNotAvailable
-				return
-			}
-			done <- er
-			return
+	// 从Consul获取服务信息
+	entries, _, err := s.consulClient.Health().Service(service, "", true, nil)
+	if err != nil {
+		if _, ok := err.(*net.OpError); ok {
+			return ErrConsulNotAvailable
 		}
-
-		if status != api.HealthPassing {
-			done <- ErrNoHealthyInstances
-			return
-		}
-
-		if len(services) == 0 {
-			done <- ErrServiceNotFound
-			return
-		}
-
-		var arrays []*api.AgentService
-		for _, ss := range services {
-			if ss.Service != nil {
-				arrays = append(arrays, ss.Service)
-			}
-		}
-
-		if len(arrays) == 0 {
-			done <- ErrNoHealthyInstances
-			return
-		}
-
-		s.serviceMap[service] = arrays
-		done <- nil
-	}()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			return fmt.Errorf("failed to init service %s: %w", service, err)
-		}
-		return nil
-	case <-ctx.Done():
-		return fmt.Errorf("init service %s timeout: %w", service, ctx.Err())
+		return fmt.Errorf("failed to get service: %w", err)
 	}
+
+	if len(entries) == 0 {
+		return ErrNoHealthyInstances
+	}
+
+	// 更新本地缓存
+	var services []*api.AgentService
+	for _, entry := range entries {
+		if entry.Checks.AggregatedStatus() == api.HealthPassing {
+			services = append(services, entry.Service)
+		}
+	}
+
+	if len(services) == 0 {
+		return ErrNoHealthyInstances
+	}
+
+	s.serviceMap[service] = services
+	return nil
 }
 
 func (s *Agent) Refresh(serviceNames ...string) error {
@@ -340,23 +301,28 @@ func (s *Agent) Refresh(serviceNames ...string) error {
 			return ErrEmptyServiceName
 		}
 
+		// 停止现有的Watch
 		if plan, exists := s.watchMap[name]; exists && plan != nil {
 			plan.Stop()
 			delete(s.watchMap, name)
 		}
 
+		// 清除本地缓存
 		delete(s.serviceMap, name)
 
-		ctx, cancel := context.WithTimeout(s.ctx, defaultTimeout)
-		defer cancel()
-
-		if err := RetryWithTimeout(ctx, func() error {
-			if err := s.initServiceLocked(name); err != nil {
-				return fmt.Errorf("failed to refresh service %s: %w", name, err)
+		// 重新初始化服务
+		if err := s.initServiceLocked(name); err != nil {
+			if errors.Is(err, ErrServiceNotFound) ||
+				errors.Is(err, ErrEmptyServiceName) ||
+				errors.Is(err, ErrNoHealthyInstances) {
+				return err
 			}
-			return s.watch(name)
-		}); err != nil {
-			return err
+			return fmt.Errorf("failed to refresh service %s: %w", name, err)
+		}
+
+		// 重新启动Watch
+		if err := s.watch(name); err != nil {
+			return fmt.Errorf("failed to restart watch for service %s: %w", name, err)
 		}
 	}
 	return nil
@@ -410,4 +376,53 @@ func (s *Agent) Close() error {
 	s.roundMap = nil
 	s.httpClient = nil
 	return nil
+}
+
+func (s *Agent) GetService(service string) ([]*api.ServiceEntry, error) {
+	if service == "" {
+		return nil, ErrEmptyServiceName
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// 先尝试从本地缓存获取
+	if services, ok := s.serviceMap[service]; ok && len(services) > 0 {
+		var entries []*api.ServiceEntry
+		for _, svc := range services {
+			entries = append(entries, &api.ServiceEntry{
+				Service: svc,
+				Checks: api.HealthChecks{
+					&api.HealthCheck{
+						Status: api.HealthPassing,
+					},
+				},
+			})
+		}
+		return entries, nil
+	}
+
+	// 如果本地缓存没有，则从Consul获取
+	entries, _, err := s.consulClient.Health().Service(service, "", true, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get service: %w", err)
+	}
+
+	if len(entries) == 0 {
+		return nil, ErrNoHealthyInstances
+	}
+
+	// 更新本地缓存
+	var services []*api.AgentService
+	for _, entry := range entries {
+		if entry.Checks.AggregatedStatus() == api.HealthPassing {
+			services = append(services, entry.Service)
+		}
+	}
+
+	if len(services) > 0 {
+		s.serviceMap[service] = services
+	}
+
+	return entries, nil
 }

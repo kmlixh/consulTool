@@ -204,7 +204,6 @@ func (a *Agent) watch(service string) error {
 	plan, err := watch.Parse(map[string]interface{}{
 		"type":    "service",
 		"service": service,
-		"timeout": defaultTimeout.String(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to parse watch plan: %w", err)
@@ -234,6 +233,9 @@ func (a *Agent) watch(service string) error {
 				fmt.Printf("No healthy instances found for service: %s\n", service)
 			}
 			a.metrics.IncrementHealthCheckFailure()
+			// 清除本地缓存
+			delete(a.serviceMap, service)
+			a.cache.Delete(service)
 			return
 		}
 
@@ -249,7 +251,6 @@ func (a *Agent) watch(service string) error {
 		}
 	}
 
-	watchCtx, cancel := context.WithCancel(a.ctx)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -257,20 +258,11 @@ func (a *Agent) watch(service string) error {
 					fmt.Printf("Recovered from watch panic for service %s: %v\n", service, r)
 				}
 			}
-			cancel()
 		}()
 
 		if err := plan.RunWithClientAndHclog(a.consulClient, nil); err != nil && debug {
 			fmt.Printf("Watch plan for service %s ended with error: %v\n", service, err)
 		}
-	}()
-
-	go func() {
-		<-watchCtx.Done()
-		if debug {
-			fmt.Printf("Stopping watch for service %s\n", service)
-		}
-		plan.Stop()
 	}()
 
 	a.watchMap[service] = plan
@@ -318,7 +310,7 @@ func (a *Agent) Refresh(serviceNames ...string) error {
 func (a *Agent) GetService(name string) ([]*api.ServiceEntry, error) {
 	// 尝试从缓存获取
 	if cached, ok := a.cache.Load(name); ok {
-		entry := cached.(serviceCache)
+		entry := cached.(*serviceCache)
 		if !entry.IsExpired() {
 			a.metrics.IncrementCacheHit()
 			return entry.Services, nil
@@ -332,7 +324,7 @@ func (a *Agent) GetService(name string) ([]*api.ServiceEntry, error) {
 	}
 
 	// 更新缓存
-	a.cache.Store(name, serviceCache{
+	a.cache.Store(name, &serviceCache{
 		Services:  services,
 		ExpiresAt: time.Now().Add(defaultCacheTTL),
 	})

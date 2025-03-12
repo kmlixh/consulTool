@@ -160,9 +160,12 @@ func (b *ServiceRegistrantBuilder) Build() (*ServiceRegistrant, error) {
 	if b.config == nil {
 		return nil, errors.New("config is required")
 	}
-	if b.config.GetAddress() == "" {
+
+	address := b.config.GetAddress()
+	if address == "" {
 		return nil, errors.New("consul address is required")
 	}
+
 	if b.name == "" {
 		return nil, errors.New("service name is required")
 	}
@@ -175,7 +178,7 @@ func (b *ServiceRegistrantBuilder) Build() (*ServiceRegistrant, error) {
 
 	// 创建Consul客户端
 	client, err := api.NewClient(&api.Config{
-		Address: b.config.GetAddress(),
+		Address: address,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consul client: %v", err)
@@ -183,7 +186,7 @@ func (b *ServiceRegistrantBuilder) Build() (*ServiceRegistrant, error) {
 
 	// 如果没有设置地址，使用GetOutIp获取本地IP
 	if b.address == "" {
-		b.address = GetOutIp(b.config.GetAddress())
+		b.address = GetOutIp(address)
 		if b.address == "" {
 			return nil, errors.New("failed to get local IP address")
 		}

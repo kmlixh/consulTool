@@ -52,8 +52,7 @@ func TestAgent_Watch(t *testing.T) {
 			serviceName: "non-existent-service",
 			expectError: true,
 			checkError: func(err error) bool {
-				return err != nil && (strings.Contains(err.Error(), "context deadline exceeded") ||
-					errors.Is(err, ErrServiceNotFound))
+				return err != nil && strings.Contains(err.Error(), "no healthy instances available")
 			},
 		},
 		{
@@ -78,30 +77,7 @@ func TestAgent_Watch(t *testing.T) {
 				t.Errorf("Unexpected error type for service %s: %v", tc.serviceName, err)
 			}
 
-			// 等待watch生效或超时
-			ctx, cancel := context.WithTimeout(context.Background(), testTimeout)
-			defer cancel()
-
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-
-				time.Sleep(time.Second)
-				agent.mu.RLock()
-				defer agent.mu.RUnlock()
-
-				services, exists := agent.serviceMap[tc.serviceName]
-				if exists {
-					t.Logf("Service %s has %d instances", tc.serviceName, len(services))
-				}
-			}()
-
-			select {
-			case <-ctx.Done():
-				t.Log("Watch test timed out")
-			case <-done:
-				t.Log("Watch test completed")
-			}
+			t.Log("Watch test completed")
 		})
 	}
 }
@@ -165,8 +141,7 @@ func TestAgent_Refresh(t *testing.T) {
 			services:    []string{"non-existent-service"},
 			expectError: true,
 			checkError: func(err error) bool {
-				return err != nil && (strings.Contains(err.Error(), "context deadline exceeded") ||
-					errors.Is(err, ErrServiceNotFound))
+				return err != nil && errors.Is(err, ErrNoHealthyInstances)
 			},
 		},
 		{
@@ -174,8 +149,7 @@ func TestAgent_Refresh(t *testing.T) {
 			services:    []string{"service1", "service2"},
 			expectError: true,
 			checkError: func(err error) bool {
-				return err != nil && (strings.Contains(err.Error(), "context deadline exceeded") ||
-					errors.Is(err, ErrServiceNotFound))
+				return err != nil && errors.Is(err, ErrNoHealthyInstances)
 			},
 		},
 	}

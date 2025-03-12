@@ -111,6 +111,9 @@ func TestServiceDiscovery(t *testing.T) {
 
 	// 测试服务发现
 	t.Run("Discover Service", func(t *testing.T) {
+		// 等待服务注册和健康检查完成
+		time.Sleep(10 * time.Second)
+
 		services, err := agent.GetService(testServiceName)
 		if err != nil {
 			t.Fatalf("Failed to discover service: %v", err)
@@ -143,14 +146,25 @@ func TestServiceDiscovery(t *testing.T) {
 	// 测试服务监控
 	t.Run("Watch Service", func(t *testing.T) {
 		// 先确保服务是健康的
-		time.Sleep(10 * time.Second)
+		time.Sleep(5 * time.Second)
 
+		// 启动监控
 		if err := agent.Watch(testServiceName); err != nil {
 			t.Fatalf("Failed to start watching service: %v", err)
 		}
 
 		// 等待监控启动
-		time.Sleep(time.Second)
+		time.Sleep(2 * time.Second)
+
+		// 验证服务是否被监控到
+		services, err := agent.GetService(testServiceName)
+		if err != nil {
+			t.Fatalf("Failed to get service: %v", err)
+		}
+
+		if len(services) == 0 {
+			t.Fatal("Service should be monitored")
+		}
 
 		// 注销服务
 		if err := registrant.DeRegisterService(); err != nil {
@@ -158,10 +172,10 @@ func TestServiceDiscovery(t *testing.T) {
 		}
 
 		// 等待服务注销生效
-		time.Sleep(2 * time.Second)
+		time.Sleep(5 * time.Second)
 
 		// 验证服务已被移除
-		services, err := agent.GetService(testServiceName)
+		services, err = agent.GetService(testServiceName)
 		if err == nil && len(services) > 0 {
 			t.Error("Service should not be available after deregistration")
 		}
@@ -345,8 +359,8 @@ func TestServiceRegistration(t *testing.T) {
 			WithID(testServiceID).
 			WithPort(testPort).
 			Build()
-		if err == nil {
-			t.Error("Expected error for empty consul address")
+		if err == nil || err.Error() != "consul address is required" {
+			t.Errorf("Expected error 'consul address is required', got: %v", err)
 		}
 	})
 }

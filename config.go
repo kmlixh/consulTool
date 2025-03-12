@@ -18,7 +18,7 @@ type ConfigOption func(*Config)
 // NewConfig 创建一个新的 Config 实例
 func NewConfig(opts ...ConfigOption) *Config {
 	cfg := &Config{
-		config: api.DefaultConfig(),
+		config: &api.Config{},
 	}
 	for _, opt := range opts {
 		opt(cfg)
