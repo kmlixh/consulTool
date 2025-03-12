@@ -200,9 +200,9 @@ func (s *Agent) watch(service string) (er error) {
 	}
 
 	plan, er = watch.Parse(map[string]interface{}{
-		"type":    "service",
-		"service": service,
-		"timeout": defaultTimeout.String(),
+		"type":        "service",
+		"service":     service,
+		"passingonly": true,
 	})
 	if er != nil {
 		return fmt.Errorf("failed to parse watch plan: %w", er)

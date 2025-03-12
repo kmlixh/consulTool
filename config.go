@@ -1,25 +1,68 @@
 package consulTool
 
-import "github.com/hashicorp/consul/api"
+import (
+	"time"
+
+	"github.com/hashicorp/consul/api"
+	"github.com/kmlixh/consulTool/errors"
+)
 
 // Config 封装了 api.Config，提供安全的访问方式
 type Config struct {
 	config *api.Config
 }
 
+// ConfigOption 定义配置选项函数类型
+type ConfigOption func(*Config)
+
 // NewConfig 创建一个新的 Config 实例
-func NewConfig() *Config {
-	return &Config{
+func NewConfig(opts ...ConfigOption) *Config {
+	cfg := &Config{
 		config: api.DefaultConfig(),
 	}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
 }
 
 // NewConfigWithAddress 使用指定地址创建一个新的 Config 实例
 func NewConfigWithAddress(address string) *Config {
-	cfg := api.DefaultConfig()
-	cfg.Address = address
-	return &Config{
-		config: cfg,
+	return NewConfig(WithAddress(address))
+}
+
+// WithAddress 设置地址的配置选项
+func WithAddress(address string) ConfigOption {
+	return func(c *Config) {
+		c.SetAddress(address)
+	}
+}
+
+// WithToken 设置令牌的配置选项
+func WithToken(token string) ConfigOption {
+	return func(c *Config) {
+		c.SetToken(token)
+	}
+}
+
+// WithScheme 设置协议的配置选项
+func WithScheme(scheme string) ConfigOption {
+	return func(c *Config) {
+		c.SetScheme(scheme)
+	}
+}
+
+// WithDatacenter 设置数据中心的配置选项
+func WithDatacenter(datacenter string) ConfigOption {
+	return func(c *Config) {
+		c.SetDatacenter(datacenter)
+	}
+}
+
+// WithTimeout 设置超时时间的配置选项
+func WithTimeout(timeout time.Duration) ConfigOption {
+	return func(c *Config) {
+		c.config.WaitTime = timeout
 	}
 }
 
@@ -63,7 +106,57 @@ func (c *Config) GetDatacenter() string {
 	return c.config.Datacenter
 }
 
-// GetConfig 获取内部的 api.Config（仅供内部使用）
+// GetTimeout 获取超时时间
+func (c *Config) GetTimeout() time.Duration {
+	return c.config.WaitTime
+}
+
+// SetTimeout 设置超时时间
+func (c *Config) SetTimeout(timeout time.Duration) {
+	c.config.WaitTime = timeout
+}
+
+// Validate 验证配置是否有效
+func (c *Config) Validate() error {
+	if c.GetAddress() == "" {
+		return errors.NewError(errors.ErrCodeConfigInvalid, "address is required", nil)
+	}
+	if c.GetScheme() != "" && c.GetScheme() != "http" && c.GetScheme() != "https" {
+		return errors.NewError(errors.ErrCodeConfigInvalid, "scheme must be either http or https", nil)
+	}
+	return nil
+}
+
+// Clone 克隆配置
+func (c *Config) Clone() *Config {
+	newConfig := api.DefaultConfig()
+	newConfig.Address = c.GetAddress()
+	newConfig.Scheme = c.GetScheme()
+	newConfig.Datacenter = c.GetDatacenter()
+	newConfig.Token = c.GetToken()
+	newConfig.WaitTime = c.GetTimeout()
+
+	return &Config{
+		config: newConfig,
+	}
+}
+
+// getConfig 获取内部的 api.Config（仅供内部使用）
 func (c *Config) getConfig() *api.Config {
 	return c.config
+}
+
+// String 返回配置的字符串表示
+func (c *Config) String() string {
+	hasToken := "false"
+	if c.GetToken() != "" {
+		hasToken = "true"
+	}
+	return "Config{" +
+		"Address: " + c.GetAddress() +
+		", Scheme: " + c.GetScheme() +
+		", Datacenter: " + c.GetDatacenter() +
+		", HasToken: " + hasToken +
+		", Timeout: " + c.GetTimeout().String() +
+		"}"
 }
