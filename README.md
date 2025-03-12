@@ -16,7 +16,7 @@
 ## 安装
 
 ```bash
-go get github.com/kmlixh/consulTool@v4.6.1
+go get github.com/kmlixh/consulTool@v1.0.9-ai
 ```
 
 ## 快速开始
@@ -181,10 +181,14 @@ kmlixh
 
 ## 版本历史
 
-- v4.6.1
+- v1.0.9-ai
   - 优化服务发现性能
-  - 改进错误处理
+  - 改进错误处理机制
+  - 增加本地缓存支持
   - 增加性能指标收集
+  - 优化 Watch 机制
+  - 完善单元测试
+  - 增加集成测试
   - 完善文档
 
 components:
