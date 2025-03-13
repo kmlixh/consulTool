@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kmlixh/consulTool"
-	"github.com/kmlixh/consulTool/agent"
 	"github.com/kmlixh/consulTool/logger"
 )
 
@@ -21,10 +20,12 @@ func main() {
 	})
 
 	// 创建Consul配置
-	config := consulTool.NewConfig(consulTool.WithAddress("http://192.168.111.20:8500"))
+	config := consulTool.NewConfig().
+		WithAddress("192.168.111.20:8500").
+		WithScheme("http")
 
 	// 创建Agent用于服务发现
-	agent := agent.NewAgent(config)
+	agent := consulTool.NewAgent(config)
 
 	// 启动健康检查服务器
 	mux := http.NewServeMux()

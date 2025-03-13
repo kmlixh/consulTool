@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/kmlixh/consulTool"
-	"github.com/kmlixh/consulTool/agent"
 	"github.com/kmlixh/consulTool/logger"
 )
 
@@ -61,7 +60,9 @@ func setupTestService(t *testing.T) (*consulTool.ServiceRegistrant, func(), erro
 	// 启动健康检查服务器
 	server, localIP := setupHealthCheckServer(t)
 
-	config := consulTool.NewConfig(consulTool.WithAddress("http://" + consulAddr))
+	config := consulTool.NewConfig().
+		WithAddress(consulAddr).
+		WithScheme("http")
 	registrant, err := consulTool.NewServiceRegistrantBuilder(config).
 		WithName(testServiceName).
 		WithID(testServiceID).
@@ -106,8 +107,10 @@ func TestServiceDiscovery(t *testing.T) {
 	defer cleanup()
 
 	// 创建Agent进行服务发现
-	config := consulTool.NewConfig(consulTool.WithAddress("http://" + consulAddr))
-	agent := agent.NewAgent(config)
+	config := consulTool.NewConfig().
+		WithAddress(consulAddr).
+		WithScheme("http")
+	agent := consulTool.NewAgent(config)
 
 	// 测试服务发现
 	t.Run("Discover Service", func(t *testing.T) {
@@ -242,7 +245,9 @@ func TestServiceRegistration(t *testing.T) {
 		_, _ = consulTool.NewServiceRegistrantBuilder(nil).Build()
 	})
 
-	config := consulTool.NewConfig(consulTool.WithAddress("http://" + consulAddr))
+	config := consulTool.NewConfig().
+		WithAddress(consulAddr).
+		WithScheme("http")
 
 	// 测试服务注册
 	t.Run("Register Service", func(t *testing.T) {
@@ -286,8 +291,8 @@ func TestServiceRegistration(t *testing.T) {
 		time.Sleep(10 * time.Second)
 
 		// 验证服务已注册
-		agent := agent.NewAgent(config)
-		services, err := agent.GetService(testServiceName)
+		testAgent := consulTool.NewAgent(config)
+		services, err := testAgent.GetService(testServiceName)
 		if err != nil {
 			t.Fatalf("Failed to get service: %v", err)
 		}

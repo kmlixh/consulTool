@@ -116,6 +116,38 @@ func (c *Config) SetTimeout(timeout time.Duration) {
 	c.config.WaitTime = timeout
 }
 
+// 添加链式调用方法
+
+// WithAddress 链式调用设置地址
+func (c *Config) WithAddress(address string) *Config {
+	c.SetAddress(address)
+	return c
+}
+
+// WithToken 链式调用设置令牌
+func (c *Config) WithToken(token string) *Config {
+	c.SetToken(token)
+	return c
+}
+
+// WithScheme 链式调用设置协议
+func (c *Config) WithScheme(scheme string) *Config {
+	c.SetScheme(scheme)
+	return c
+}
+
+// WithDatacenter 链式调用设置数据中心
+func (c *Config) WithDatacenter(datacenter string) *Config {
+	c.SetDatacenter(datacenter)
+	return c
+}
+
+// WithTimeout 链式调用设置超时时间
+func (c *Config) WithTimeout(timeout time.Duration) *Config {
+	c.SetTimeout(timeout)
+	return c
+}
+
 // Validate 验证配置是否有效
 func (c *Config) Validate() error {
 	if c.GetAddress() == "" {
