@@ -12,11 +12,12 @@
 - 性能指标收集
 - 优雅的错误处理
 - HTTP 客户端集成
+- KV 存储操作
 
 ## 安装
 
 ```bash
-go get github.com/kmlixh/consulTool@v1.0.9-ai
+go get github.com/kmlixh/consulTool@v1.1.0-ai
 ```
 
 ## 快速开始
@@ -34,7 +35,7 @@ func main() {
     // 创建配置
     config := consulTool.NewConfig(consulTool.WithAddress("http://localhost:8500"))
     
-    // 创建服务注册器
+    // 创建服务注册
     registrant, err := consulTool.NewServiceRegistrantBuilder(config).
         WithName("my-service").
         WithID("my-service-1").
@@ -130,6 +131,46 @@ client := agent.HttpClient()
 resp, err := client.Get("http://my-service/api/endpoint")
 ```
 
+## KV 存储操作
+
+consulTool 提供了对 Consul KV 存储的操作支持：
+
+```go
+// 获取单个键值
+kvPair, err := agent.GetKV("my-key")
+if err != nil {
+    panic(err)
+}
+fmt.Printf("Key: %s, Value: %s\n", kvPair.Key, string(kvPair.Value))
+
+// 获取指定前缀的所有键值对
+kvPairs, err := agent.GetKVs("my-prefix")
+if err != nil {
+    panic(err)
+}
+for _, pair := range kvPairs {
+    fmt.Printf("Key: %s, Value: %s\n", pair.Key, string(pair.Value))
+}
+
+// 设置键值对
+err := agent.PutKV("my-key", []byte("my-value"))
+if err != nil {
+    panic(err)
+}
+
+// 删除键值对
+err := agent.DeleteKV("my-key")
+if err != nil {
+    panic(err)
+}
+
+// 删除指定前缀的所有键值对
+err := agent.DeleteKVWithPrefix("my-prefix")
+if err != nil {
+    panic(err)
+}
+```
+
 ## 性能指标
 
 可以通过 Agent 获取性能指标：
@@ -139,24 +180,6 @@ metrics := agent.GetMetrics()
 fmt.Printf("Service Discovery Count: %d\n", metrics["service_discovery_count"])
 fmt.Printf("Cache Hit Count: %d\n", metrics["cache_hit_count"])
 fmt.Printf("Watch Count: %d\n", metrics["watch_count"])
-```
-
-## 错误处理
-
-consulTool 定义了一系列标准错误类型：
-
-- `ErrServiceNotFound`: 服务未找到
-- `ErrNoHealthyInstances`: 没有健康的服务实例
-- `ErrConsulNotAvailable`: Consul 服务不可用
-- `ErrEmptyServiceName`: 服务名称为空
-- `ErrNothingToRefresh`: 没有需要刷新的服务
-
-## 调试模式
-
-可以启用调试模式查看详细日志：
-
-```go
-consulTool.Debug(true)
 ```
 
 ## 最佳实践
@@ -181,7 +204,8 @@ kmlixh
 
 ## 版本历史
 
-- v1.0.9-ai
+- v1.1.0-ai
+  - 添加 KV 存储操作支持
   - 优化服务发现性能
   - 改进错误处理机制
   - 增加本地缓存支持
@@ -230,4 +254,24 @@ NewAgent(config *api.Config) *Agent
 
 
 `
+
+## 错误处理
+
+consulTool 定义了一系列标准错误类型：
+
+- `ErrServiceNotFound`: 服务未找到
+- `ErrNoHealthyInstances`: 没有健康的服务实例
+- `ErrConsulNotAvailable`: Consul 服务不可用
+- `ErrEmptyServiceName`: 服务名称为空
+- `ErrNothingToRefresh`: 没有需要刷新的服务
+- `ErrEmptyKey`: 键名为空
+- `ErrKeyNotFound`: 键不存在
+
+## 调试模式
+
+可以启用调试模式查看详细日志：
+
+```go
+consulTool.Debug(true)
+```
 
