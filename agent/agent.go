@@ -392,3 +392,86 @@ func (a *Agent) Close() error {
 	a.cancel()
 	return nil
 }
+
+// GetKV 获取指定键的值
+func (a *Agent) GetKV(key string) (*api.KVPair, error) {
+	if key == "" {
+		return nil, errors.ErrEmptyKey
+	}
+
+	pair, _, err := a.consulClient.KV().Get(key, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get KV: %w", err)
+	}
+
+	if pair == nil {
+		return nil, errors.ErrKeyNotFound
+	}
+
+	return pair, nil
+}
+
+// GetKVs 获取指定前缀的所有键值对
+func (a *Agent) GetKVs(prefix string) (api.KVPairs, error) {
+	if prefix == "" {
+		return nil, errors.ErrEmptyKey
+	}
+
+	pairs, _, err := a.consulClient.KV().List(prefix, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list KVs with prefix %s: %w", prefix, err)
+	}
+
+	if len(pairs) == 0 {
+		return nil, errors.ErrKeyNotFound
+	}
+
+	return pairs, nil
+}
+
+// PutKV 设置键值对
+func (a *Agent) PutKV(key string, value []byte) error {
+	if key == "" {
+		return errors.ErrEmptyKey
+	}
+
+	p := &api.KVPair{
+		Key:   key,
+		Value: value,
+	}
+
+	_, err := a.consulClient.KV().Put(p, nil)
+	if err != nil {
+		return fmt.Errorf("failed to put KV: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteKV 删除键值对
+func (a *Agent) DeleteKV(key string) error {
+	if key == "" {
+		return errors.ErrEmptyKey
+	}
+
+	_, err := a.consulClient.KV().Delete(key, nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete KV: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteKVWithPrefix 删除指定前缀的所有键值对
+func (a *Agent) DeleteKVWithPrefix(prefix string) error {
+	if prefix == "" {
+		return errors.ErrEmptyKey
+	}
+
+	_, err := a.consulClient.KV().DeleteTree(prefix, nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete KV tree with prefix %s: %w", prefix, err)
+	}
+
+	return nil
+}

@@ -18,6 +18,8 @@ const (
 	ErrCodeNothingToRefresh
 	ErrCodeTimeout
 	ErrCodeValidation
+	ErrCodeEmptyKey    // 新增：空键错误
+	ErrCodeKeyNotFound // 新增：键不存在错误
 )
 
 // ConsulError 统一的错误类型
@@ -42,6 +44,8 @@ var (
 	ErrEmptyServiceName   = &ConsulError{Code: ErrCodeEmptyServiceName, Message: "empty service name"}
 	ErrNothingToRefresh   = &ConsulError{Code: ErrCodeNothingToRefresh, Message: "nothing to refresh"}
 	ErrTimeout            = &ConsulError{Code: ErrCodeTimeout, Message: "operation timeout"}
+	ErrEmptyKey           = &ConsulError{Code: ErrCodeEmptyKey, Message: "empty key"}        // 新增：空键错误
+	ErrKeyNotFound        = &ConsulError{Code: ErrCodeKeyNotFound, Message: "key not found"} // 新增：键不存在错误
 )
 
 // NewError 创建新的错误
