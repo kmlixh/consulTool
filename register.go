@@ -177,9 +177,7 @@ func (b *ServiceRegistrantBuilder) Build() (*ServiceRegistrant, error) {
 	}
 
 	// 创建Consul客户端
-	client, err := api.NewClient(&api.Config{
-		Address: address,
-	})
+	client, err := api.NewClient(b.config.getConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to create consul client: %v", err)
 	}

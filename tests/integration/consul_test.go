@@ -13,7 +13,8 @@ import (
 )
 
 var (
-	consulAddr      = "192.168.111.20:8500"
+	consulAddr      = "10.0.1.5:8500"
+	consulToken     = "29b48cf4-f1f3-159e-4860-d1c9a43f6e91"
 	testServiceID   = "test-service-1"
 	testServiceName = "test-service"
 	testPort        = 8080
@@ -62,6 +63,7 @@ func setupTestService(t *testing.T) (*consulTool.ServiceRegistrant, func(), erro
 
 	config := consulTool.NewConfig().
 		WithAddress(consulAddr).
+		WithToken(consulToken).
 		WithScheme("http")
 	registrant, err := consulTool.NewServiceRegistrantBuilder(config).
 		WithName(testServiceName).
@@ -109,6 +111,7 @@ func TestServiceDiscovery(t *testing.T) {
 	// 创建Agent进行服务发现
 	config := consulTool.NewConfig().
 		WithAddress(consulAddr).
+		WithToken(consulToken).
 		WithScheme("http")
 	agent := consulTool.NewAgent(config)
 
@@ -247,6 +250,7 @@ func TestServiceRegistration(t *testing.T) {
 
 	config := consulTool.NewConfig().
 		WithAddress(consulAddr).
+		WithToken(consulToken).
 		WithScheme("http")
 
 	// 测试服务注册
