@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -502,14 +503,20 @@ func (a *Agent) Close() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	for service, plan := range a.watchMap {
+	for watchKey, plan := range a.watchMap {
 		if plan != nil {
 			if debug {
-				fmt.Printf("Stopping watch for service %s\n", service)
+				if strings.HasPrefix(watchKey, "kv_") {
+					fmt.Printf("Stopping KV watch for key %s\n", strings.TrimPrefix(watchKey, "kv_"))
+				} else if strings.HasPrefix(watchKey, "kvprefix_") {
+					fmt.Printf("Stopping KV prefix watch for prefix %s\n", strings.TrimPrefix(watchKey, "kvprefix_"))
+				} else {
+					fmt.Printf("Stopping watch for service %s\n", watchKey)
+				}
 			}
 			plan.Stop()
 		}
-		delete(a.watchMap, service)
+		delete(a.watchMap, watchKey)
 	}
 
 	if a.httpClient != nil {
@@ -624,6 +631,168 @@ func (a *Agent) DeleteKVWithPrefix(prefix string) error {
 		a.metrics.IncrementKVAccess()
 	}
 
+	return nil
+}
+
+// WatchKV 监听指定键的 KV 变化
+func (a *Agent) WatchKV(key string, watcherFunc func(index uint64, kvPair *api.KVPair)) error {
+	if key == "" {
+		return ErrEmptyKey
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// 检查是否已经在监听
+	watchKey := "kv_" + key
+	if _, exists := a.watchMap[watchKey]; exists {
+		return nil // 已经在监听，直接返回
+	}
+
+	// 创建监听计划
+	params := map[string]interface{}{
+		"type": "key",
+		"key":  key,
+	}
+
+	plan, err := watch.Parse(params)
+	if err != nil {
+		return fmt.Errorf("failed to parse watch plan for KV %s: %w", key, err)
+	}
+
+	plan.Handler = func(index uint64, data interface{}) {
+		if data != nil {
+			if kvPair, ok := data.(*api.KVPair); ok {
+				if debug {
+					fmt.Printf("KV changed for key %s: %s\n", key, string(kvPair.Value))
+				}
+				watcherFunc(index, kvPair)
+			}
+		}
+	}
+
+	// 在 goroutine 中启动监听
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if debug {
+					fmt.Printf("Recovered from KV watch panic for key %s: %v\n", key, r)
+				}
+			}
+		}()
+
+		if err := plan.RunWithClientAndHclog(a.consulClient, nil); err != nil && debug {
+			fmt.Printf("KV watch plan for key %s ended with error: %v\n", key, err)
+		}
+	}()
+
+	a.watchMap[watchKey] = plan
+	return nil
+}
+
+// StopWatchKV 停止监听指定键的 KV 变化
+func (a *Agent) StopWatchKV(key string) error {
+	if key == "" {
+		return ErrEmptyKey
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	watchKey := "kv_" + key
+	plan, exists := a.watchMap[watchKey]
+	if !exists {
+		return nil // 没有在监听，直接返回
+	}
+
+	if plan != nil {
+		if debug {
+			fmt.Printf("Stopping KV watch for key %s\n", key)
+		}
+		plan.Stop()
+	}
+	delete(a.watchMap, watchKey)
+	return nil
+}
+
+// WatchKVPrefix 监听指定前缀的所有 KV 变化
+func (a *Agent) WatchKVPrefix(prefix string, watcherFunc func(index uint64, pairs api.KVPairs)) error {
+	if prefix == "" {
+		return ErrEmptyKey
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// 检查是否已经在监听
+	watchKey := "kvprefix_" + prefix
+	if _, exists := a.watchMap[watchKey]; exists {
+		return nil // 已经在监听，直接返回
+	}
+
+	// 创建监听计划
+	params := map[string]interface{}{
+		"type":   "keyprefix",
+		"prefix": prefix,
+	}
+
+	plan, err := watch.Parse(params)
+	if err != nil {
+		return fmt.Errorf("failed to parse watch plan for KV prefix %s: %w", prefix, err)
+	}
+
+	plan.Handler = func(index uint64, data interface{}) {
+		if data != nil {
+			if pairs, ok := data.(api.KVPairs); ok {
+				if debug {
+					fmt.Printf("KV prefix changed for prefix %s: %d pairs\n", prefix, len(pairs))
+				}
+				watcherFunc(index, pairs)
+			}
+		}
+	}
+
+	// 在 goroutine 中启动监听
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if debug {
+					fmt.Printf("Recovered from KV prefix watch panic for prefix %s: %v\n", prefix, r)
+				}
+			}
+		}()
+
+		if err := plan.RunWithClientAndHclog(a.consulClient, nil); err != nil && debug {
+			fmt.Printf("KV prefix watch plan for prefix %s ended with error: %v\n", prefix, err)
+		}
+	}()
+
+	a.watchMap[watchKey] = plan
+	return nil
+}
+
+// StopWatchKVPrefix 停止监听指定前缀的 KV 变化
+func (a *Agent) StopWatchKVPrefix(prefix string) error {
+	if prefix == "" {
+		return ErrEmptyKey
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	watchKey := "kvprefix_" + prefix
+	plan, exists := a.watchMap[watchKey]
+	if !exists {
+		return nil // 没有在监听，直接返回
+	}
+
+	if plan != nil {
+		if debug {
+			fmt.Printf("Stopping KV prefix watch for prefix %s\n", prefix)
+		}
+		plan.Stop()
+	}
+	delete(a.watchMap, watchKey)
 	return nil
 }
 

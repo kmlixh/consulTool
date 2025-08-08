@@ -51,9 +51,13 @@ func (wg *WatchGroup) Remove(name string) error {
 		return errors.NewError(errors.ErrCodeValidation, fmt.Sprintf("watch with name %s does not exist", name), nil)
 	}
 
-	// 停止监控
-	if err := watch.StopWatchService(name); err != nil {
-		return errors.NewError(errors.ErrCodeUnknown, fmt.Sprintf("failed to stop watch %s", name), err)
+	// 停止监控 - 这里应该根据监控类型来决定调用哪个停止方法
+	// 由于 WatchGroup 没有记录监控类型，我们尝试停止所有类型的监控
+	if err := watch.StopWatchKv(name); err != nil {
+		// 如果 KV 监控停止失败，尝试停止服务监控
+		if stopErr := watch.StopWatchService(name); stopErr != nil {
+			return errors.NewError(errors.ErrCodeUnknown, fmt.Sprintf("failed to stop watch %s", name), err)
+		}
 	}
 
 	delete(wg.watches, name)
@@ -76,8 +80,12 @@ func (wg *WatchGroup) StopAll() error {
 
 	var lastErr error
 	for name, watch := range wg.watches {
-		if err := watch.StopWatchService(name); err != nil {
-			lastErr = errors.NewError(errors.ErrCodeUnknown, fmt.Sprintf("failed to stop watch %s", name), err)
+		// 尝试停止所有类型的监控
+		if err := watch.StopWatchKv(name); err != nil {
+			// 如果 KV 监控停止失败，尝试停止服务监控
+			if stopErr := watch.StopWatchService(name); stopErr != nil {
+				lastErr = errors.NewError(errors.ErrCodeUnknown, fmt.Sprintf("failed to stop watch %s", name), err)
+			}
 		}
 	}
 

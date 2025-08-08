@@ -4,7 +4,10 @@ go 1.22.12
 
 toolchain go1.23.1
 
-require github.com/hashicorp/consul/api v1.31.2
+require (
+	github.com/hashicorp/consul/api v1.31.2
+	github.com/kmlixh/dollarYaml v1.2.1-ai
+)
 
 require (
 	github.com/armon/go-metrics v0.4.1 // indirect
@@ -21,7 +24,7 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/stretchr/testify v1.8.4 // indirect
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8 // indirect
 	golang.org/x/sys v0.29.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
